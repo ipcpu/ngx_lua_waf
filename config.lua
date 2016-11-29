@@ -1,14 +1,12 @@
-RulePath = "/usr/local/nginx/conf/waf/wafconf/"
+RulePath = "/etc/nginx/conf.d/waf/wafconf/"
 attacklog = "on"
-logdir = "/usr/local/nginx/logs/hack/"
+logdir = "/var/log/nginx"
 UrlDeny="on"
+ReferDeny="on"
 Redirect="on"
-CookieMatch="on"
-postMatch="on" 
-whiteModule="on" 
-black_fileExt={"php","jsp"}
-ipWhitelist={"127.0.0.1"}
-ipBlocklist={"1.0.0.1"}
+ipWhitelist={"127.0.0.1,127.0.0.2"}
+HostWhitelist={"bbs.9ria.com","www.9ria.com"}
+ipBlocklist={"127.1.1.1,127.1.1.2"}
 CCDeny="off"
 CCrate="100/60"
 html=[[
@@ -23,9 +21,7 @@ ul{ list-style-type:none;}
 li{ list-style-type:none;}
 </style>
 </head>
-
 <body style=" padding:0; margin:0; font:14px/1.5 Microsoft Yahei, 宋体,sans-serif; color:#555;">
-
  <div style="margin: 0 auto; width:1000px; padding-top:70px; overflow:hidden;">
   
   

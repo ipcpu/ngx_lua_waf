@@ -2,25 +2,37 @@ require 'config'
 local match = string.match
 local ngxmatch=ngx.re.match
 local unescape=ngx.unescape_uri
-local get_headers = ngx.req.get_headers
 local optionIsOn = function (options) return options == "on" and true or false end
+
 logpath = logdir 
 rulepath = RulePath
 UrlDeny = optionIsOn(UrlDeny)
-PostCheck = optionIsOn(postMatch)
-CookieCheck = optionIsOn(cookieMatch)
-WhiteCheck = optionIsOn(whiteModule)
-PathInfoFix = optionIsOn(PathInfoFix)
+ReferDeny = optionIsOn(ReferDeny)
 attacklog = optionIsOn(attacklog)
 CCDeny = optionIsOn(CCDeny)
-Redirect=optionIsOn(Redirect)
+
+--函数 getClientIp 获取用户IP
 function getClientIp()
-        IP  = ngx.var.remote_addr 
+        IP = ngx.req.get_headers()["clientRealIp"]
+        if IP == nil then
+                IP  = ngx.var.remote_addr 
+        end
         if IP == nil then
                 IP  = "unknown"
         end
         return IP
 end
+
+--函数 获取servername --
+function getServername()
+         servername = ngx.var.host
+         if servername == nil then
+            servername = "unknown"
+         end
+         return servername
+end
+
+--日志模块 --
 function write(logfile,msg)
     local fd = io.open(logfile,"ab")
     if fd == nil then return end
@@ -28,26 +40,27 @@ function write(logfile,msg)
     fd:flush()
     fd:close()
 end
-function log(method,url,data,ruletag)
+function log(hacktype,url,data,ruletag)
     if attacklog then
-        local realIp = getClientIp()
-        local ua = ngx.var.http_user_agent
-        local servername=ngx.var.server_name
-        local time=ngx.localtime()
-        if ua  then
-            line = realIp.." ["..time.."] \""..method.." "..servername..url.."\" \""..data.."\"  \""..ua.."\" \""..ruletag.."\"\n"
-        else
-            line = realIp.." ["..time.."] \""..method.." "..servername..url.."\" \""..data.."\" - \""..ruletag.."\"\n"
-        end
-        local filename = logpath..'/'..servername.."_"..ngx.today().."_sec.log"
+	    local realIp = getClientIp()
+	    local ua = ngx.var.http_user_agent
+    	local servername = getServername()
+    	local time = ngx.localtime()
+	    if ua  then
+		    line = realIp.." ["..time.."] \""..hacktype.." "..servername..url.."\" \""..data.."\"  \""..ua.."\" \""..ruletag.."\"\n"
+    	else
+	    	line = realIp.." ["..time.."] \""..hacktype.." "..servername..url.."\" \""..data.."\" - \""..ruletag.."\"\n"
+    	end
+	    local filename = logpath..'/'.."hack."..ngx.today()..".log"
         write(filename,line)
     end
 end
-------------------------------------规则读取函数-------------------------------------------------------------------
+
+--规则读取函数--
 function read_rule(var)
     file = io.open(rulepath..'/'..var,"r")
     if file==nil then
-        return
+    	return
     end
     t = {}
     for line in file:lines() do
@@ -57,85 +70,27 @@ function read_rule(var)
     return(t)
 end
 
+
 urlrules=read_rule('url')
-argsrules=read_rule('args')
 uarules=read_rule('user-agent')
-wturlrules=read_rule('whiteurl')
-postrules=read_rule('post')
-ckrules=read_rule('cookie')
+referrules=read_rule('refer')
 
 
 function say_html()
     if Redirect then
         ngx.header.content_type = "text/html"
-        ngx.status = ngx.HTTP_FORBIDDEN
         ngx.say(html)
-        ngx.exit(ngx.status)
+        ngx.exit(200)
     end
 end
 
-function whiteurl()
-    if WhiteCheck then
-        if wturlrules ~=nil then
-            for _,rule in pairs(wturlrules) do
-                if ngxmatch(ngx.var.uri,rule,"isjo") then
-                    return true 
-                 end
-            end
-        end
-    end
-    return false
-end
-function fileExtCheck(ext)
-    local items = Set(black_fileExt)
-    ext=string.lower(ext)
-    if ext then
-        for rule in pairs(items) do
-            if ngx.re.match(ext,rule,"isjo") then
-	        log('POST',ngx.var.request_uri,"-","file attack with ext "..ext)
-            say_html()
-            end
-        end
-    end
-    return false
-end
-function Set (list)
-  local set = {}
-  for _, l in ipairs(list) do set[l] = true end
-  return set
-end
-function args()
-    for _,rule in pairs(argsrules) do
-        local args = ngx.req.get_uri_args()
-        for key, val in pairs(args) do
-            if type(val)=='table' then
-                 local t={}
-                 for k,v in pairs(val) do
-                    if v == true then
-                        v=""
-                    end
-                    table.insert(t,v)
-                end
-                data=table.concat(t, " ")
-            else
-                data=val
-            end
-            if data and type(data) ~= "boolean" and rule ~="" and ngxmatch(unescape(data),rule,"isjo") then
-                log('GET',ngx.var.request_uri,"-",rule)
-                say_html()
-                return true
-            end
-        end
-    end
-    return false
-end
-
+-- url 处理函数 --
 
 function url()
     if UrlDeny then
         for _,rule in pairs(urlrules) do
             if rule ~="" and ngxmatch(ngx.var.request_uri,rule,"isjo") then
-                log('GET',ngx.var.request_uri,"-",rule)
+                log('HACK-GET',ngx.var.request_uri,"-",rule)
                 say_html()
                 return true
             end
@@ -144,46 +99,41 @@ function url()
     return false
 end
 
-function ua()
-    local ua = ngx.var.http_user_agent
-    if ua ~= nil then
-        for _,rule in pairs(uarules) do
-            if rule ~="" and ngxmatch(ua,rule,"isjo") then
-                log('UA',ngx.var.request_uri,"-",rule)
+--refer处理函数 --
+
+function refer()
+    local refer = ngx.var.http_referer
+    if ReferDeny and refer then
+        for _,rule in pairs(referrules) do
+            if rule ~="" and ngxmatch(refer,rule,"isjo") then
+                log('HACK-REFER',ngx.var.request_uri,"-",rule)
                 say_html()
-            return true
-            end
-        end
-    end
-    return false
-end
-function body(data)
-    for _,rule in pairs(postrules) do
-        if rule ~="" and data~="" and ngxmatch(unescape(data),rule,"isjo") then
-            log('POST',ngx.var.request_uri,data,rule)
-            say_html()
-            return true
-        end
-    end
-    return false
-end
-function cookie()
-    local ck = ngx.var.http_cookie
-    if CookieCheck and ck then
-        for _,rule in pairs(ckrules) do
-            if rule ~="" and ngxmatch(ck,rule,"isjo") then
-                log('Cookie',ngx.var.request_uri,"-",rule)
-                say_html()
-            return true
+                return true
             end
         end
     end
     return false
 end
 
+-- ua 处理函数 --
+function ua()
+    local ua = ngx.var.http_user_agent
+    if ua ~= nil then
+	    for _,rule in pairs(uarules) do
+	        if rule ~="" and ngxmatch(ua,rule,"isjo") then
+	            log('HACK-UA',ngx.var.request_uri,"-",rule)
+	            say_html()
+	        return true
+	        end
+	    end
+    end
+    return false
+end
+
+-- 放刷函数，--
 function denycc()
     if CCDeny then
-        local uri=ngx.var.uri
+    	local uri=ngx.var.uri
         CCcount=tonumber(string.match(CCrate,'(.*)/'))
         CCseconds=tonumber(string.match(CCrate,'/(.*)'))
         local token = getClientIp()..uri
@@ -203,23 +153,7 @@ function denycc()
     return false
 end
 
-function get_boundary()
-    local header = get_headers()["content-type"]
-    if not header then
-        return nil
-    end
-
-    if type(header) == "table" then
-        header = header[1]
-    end
-
-    local m = match(header, ";%s*boundary=\"([^\"]+)\"")
-    if m then
-        return m
-    end
-
-    return match(header, ";%s*boundary=([^\",;]+)")
-end
+--函数 whiteip 白名单，调用getClientIp函数--
 
 function whiteip()
     if next(ipWhitelist) ~= nil then
@@ -232,6 +166,8 @@ function whiteip()
         return false
 end
 
+---函数 blockip 黑名单 ， 调用getClientIp函数---
+
 function blockip()
      if next(ipBlocklist) ~= nil then
          for _,ip in pairs(ipBlocklist) do
@@ -242,4 +178,17 @@ function blockip()
          end
      end
          return false
+end
+
+-- 函数  whitehost --
+
+function whitehost()
+    if next(HostWhitelist) ~= nil then
+        for _,host in pairs(HostWhitelist) do
+             if getServername()==host then
+                 return true
+             end
+        end
+    end
+        return false
 end
